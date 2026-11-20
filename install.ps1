@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoZipUrl = "https://github.com/Anuphap2/antigravity-swarm-router/archive/refs/heads/main.zip"
-$RouterSkills = @("board-updater", "test-runner", "system-architect", "deep-coder")
+$RouterSkills = @("swarm-router", "board-updater", "test-runner", "system-architect", "deep-coder")
 $PresetMap = @{
     "quota-saver" = "gemini-4-argon-low"
     "balanced"    = "claude-sonnet-5-5-low"
@@ -128,7 +128,7 @@ try {
                 New-Item -ItemType Directory -Path $DstSkill -Force | Out-Null
             }
             Copy-Item -Path (Join-Path $SrcSkill "*") -Destination $DstSkill -Recurse -Force
-            if (($TierLowModel -ne "gemini-4-argon-low") -and ($Skill -in @("board-updater", "test-runner"))) {
+            if (($TierLowModel -ne "gemini-4-argon-low") -and ($Skill -in @("swarm-router", "board-updater", "test-runner"))) {
                 if (-not $Update -or $PresetExplicit) {
                     $SkillMd = Join-Path $DstSkill "SKILL.md"
                     $SkillText = [System.IO.File]::ReadAllText($SkillMd)

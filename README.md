@@ -100,6 +100,13 @@ irm https://raw.githubusercontent.com/Anuphap2/antigravity-swarm-router/main/ins
 
 Both `install.sh` and `install.ps1` preserve unrelated files inside `.agent/` and prompt before overwriting or removing `AGENTS.md` (pass `--force` / `-Force` for non-interactive mode).
 
+### Option 3: Slash Command Usage
+Once installed (project `.agent/skills/` or global `~/.gemini/config/skills/`), invoke directly in Antigravity chat:
+```text
+/swarm-router Fix the race condition in cache.py, run tests, and update BOARD.md
+```
+Or target a single tier directly: `/board-updater`, `/test-runner`, `/system-architect`, `/deep-coder`.
+
 ---
 
 ## Model Mapping & Fallback Customization
@@ -135,6 +142,8 @@ See [examples/custom-models.md](examples/custom-models.md) for custom mappings, 
 │   └── swarm-smoke-test.md
 └── .agent/
     └── skills/
+        ├── swarm-router/
+        │   └── SKILL.md
         ├── board-updater/
         │   └── SKILL.md
         ├── test-runner/
@@ -150,7 +159,7 @@ See [examples/custom-models.md](examples/custom-models.md) for custom mappings, 
 ## Caveats
 
 - **Prompt-Level Policy:** `AGENTS.md` and `SKILL.md` guide orchestrator/worker behavior; Antigravity does not enforce server-side token hard caps per skill.
-- **Keep Skill Count Lean:** Avoid adding 10+ micro-skills—every skill injects its `name` and `description` into context. Four core skills keep progressive-disclosure overhead minimal.
+- **Keep Skill Count Lean:** Avoid adding 10+ micro-skills—every skill injects its `name` and `description` into context. Five core skills (`swarm-router` + 4 tier skills) keep progressive-disclosure overhead minimal.
 - **Model ID Availability:** Run `swarm{action: "models", all: true}` and run [tests/swarm-smoke-test.md](tests/swarm-smoke-test.md) if swapping providers.
 - **File Ownership:** Never assign two concurrent workers to edit the same file in `inherit` workspace mode. Use `workspace: "share"` or split work strictly by file/module.
 

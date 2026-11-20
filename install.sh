@@ -7,7 +7,7 @@ PRESET="quota-saver"
 PRESET_SET=0
 MODE="install" # install | update | uninstall
 FORCE=0
-ROUTER_SKILLS=(board-updater test-runner system-architect deep-coder)
+ROUTER_SKILLS=(swarm-router board-updater test-runner system-architect deep-coder)
 
 usage() {
   cat <<'EOF'
@@ -194,7 +194,7 @@ for skill in "${ROUTER_SKILLS[@]}"; do
   if [[ -d "$SOURCE_DIR/.agent/skills/$skill" ]]; then
     mkdir -p "$TARGET_DIR/.agent/skills/$skill"
     cp -R "$SOURCE_DIR/.agent/skills/$skill/." "$TARGET_DIR/.agent/skills/$skill/"
-    if [[ "$TIER_LOW_MODEL" != "gemini-4-argon-low" && ( "$skill" == "board-updater" || "$skill" == "test-runner" ) ]]; then
+    if [[ "$TIER_LOW_MODEL" != "gemini-4-argon-low" && ( "$skill" == "swarm-router" || "$skill" == "board-updater" || "$skill" == "test-runner" ) ]]; then
       if [[ "$MODE" == "install" || "$PRESET_SET" -eq 1 ]]; then
         replace_in_file "$TARGET_DIR/.agent/skills/$skill/SKILL.md" "gemini-4-argon-low" "$TIER_LOW_MODEL"
       fi
