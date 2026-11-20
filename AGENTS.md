@@ -1,56 +1,54 @@
 # Antigravity Swarm Router
 
-Orchestrator instructions for Antigravity Swarm Mode using a **Default-Low, Escalate-High** routing strategy.
+Orchestrator routing policy for Antigravity Swarm Mode using a **Default-Low, Escalate-High** strategy with **Quota Pool Isolation**.
 
 ## Model Configuration
 
-Edit model IDs **here only** to re-map tiers across the swarm (and mirror any ID changes in the corresponding `.agent/skills/*/SKILL.md` frontmatter if your runtime inspects skill metadata directly).
-
-Run `swarm{action: "models", all: true}` to verify available model IDs in your environment.
+Edit model IDs **here only** (and mirror `model:` in `.agent/skills/*/SKILL.md` if your runtime reads skill metadata directly). Check live IDs and quotas with `swarm{action: "models", all: true}`.
 
 | Tier | Variable | Model ID | Skill Path | Primary Scope |
 | :--- | :--- | :--- | :--- | :--- |
-| Tier 1 (Default) | `TIER_LOW` | `gemini-3.8-flash-low` | `.agent/skills/board-updater/SKILL.md` | Board updates, card moves, short status summaries, formatting |
-| Tier 2 (Architect) | `TIER_ARCHITECT` | `gemini-4-hydrogen-high` | `.agent/skills/system-architect/SKILL.md` | System/DB modeling, architecture design, root-cause analysis, spec breakdown |
+| Tier 1 (Default) | `TIER_LOW` | `gemini-4-argon-low` | `.agent/skills/board-updater/SKILL.md` | Board updates, card moves, status summaries, formatting (isolated quota pool) |
+| Tier 2 (Architect) | `TIER_ARCHITECT` | `gemini-4-hydrogen-high` | `.agent/skills/system-architect/SKILL.md` | Architecture design, DB modeling, root-cause analysis, multi-worker spec split |
 | Tier 3 (Deep Coder) | `TIER_CODER` | `gemini-4-neon-high` | `.agent/skills/deep-coder/SKILL.md` | Multi-file refactoring, complex algorithms, concurrency/perf fixes, deep code reviews |
+
+### Fallback Quota Pool
+
+Switch to a fallback model from an independent quota pool via `swarm{action: "model", name, model}` or `swarm{action: "add", model}` when a primary pool drops below 20% or hits exhaustion:
+
+| Tier | Fallback Model ID | Notes |
+| :--- | :--- | :--- |
+| `TIER_LOW` | `claude-sonnet-5-5-low` or `gemini-3.8-flash-low` | Use `claude-sonnet-5-5-low` to avoid Gemini pool |
+| `TIER_ARCHITECT` | `claude-sonnet-5-5-medium` | Independent pool for design/RCA |
+| `TIER_CODER` | `claude-opus-5-5-high` | Independent pool for heavy coding/reviews |
 
 ---
 
 ## Orchestrator Routing Rules
 
-1. **Default to Tier 1 (`TIER_LOW` = `gemini-3.8-flash-low`)** for every task unless it clearly matches Tier 2 or Tier 3 criteria below.
-2. **Route to Tier 2 (`TIER_ARCHITECT` = `gemini-4-hydrogen-high`)** when the task requires:
-   - Designing system architecture, module boundaries, or API contracts
-   - Database schema modeling or migration planning
-   - Diagnosing non-obvious bugs (root-cause analysis across multiple layers)
-   - Breaking an ambiguous or multi-part spec into non-overlapping worker tasks
-3. **Route to Tier 3 (`TIER_CODER` = `gemini-4-neon-high`)** when the task requires:
-   - Coordinated multi-file refactoring across shared interfaces
-   - Implementing non-trivial algorithms, parsers, or state machines
-   - Fixing race conditions, concurrency bugs, or performance bottlenecks
-   - Conducting deep security or correctness code reviews
-4. **Swarm Execution Mechanics:**
-   - Assign explicit, non-overlapping file ownership before spawning workers.
-   - Pass `model` explicitly from the **Model Configuration** table when calling `swarm` (`action: "add"`), and instruct the worker to load its assigned `.agent/skills/<skill>/SKILL.md`.
-   - Use `workspace: "share"` for concurrent editors/builders; keep `workspace: "inherit"` for read-only reviewers and board updaters.
+1. **Default to Tier 1 (`TIER_LOW` = `gemini-4-argon-low`)** for routine updates, formatting, and summaries so heavy `Hydrogen`/`Neon` quota is untouched.
+2. **Single-Worker Threshold (Avoid Unnecessary Splits):**
+   - If a task touches **1–2 files** with clear requirements and no cross-module ambiguity, **do not split Tier 2 -> Tier 3**. Route straight to one worker (`TIER_LOW` for text/boards, `TIER_CODER` for code).
+3. **Route to Tier 2 (`TIER_ARCHITECT` = `gemini-4-hydrogen-high`)** only when the task needs system/DB modeling, multi-layer root-cause analysis, or splitting a large spec into non-overlapping worker tasks.
+4. **Route to Tier 3 (`TIER_CODER` = `gemini-4-neon-high`)** for coordinated multi-file refactors, complex algorithms, concurrency/performance fixes, or deep code reviews.
+5. **Swarm Mechanics:** Assign non-overlapping file ownership; use `workspace: "share"` for concurrent file editors and `inherit` for readers/board updaters.
 
 ---
 
 ## Token-Saving Rules
 
 ### 1. Minimal Context Handoff
-- Pass **only** the exact file paths, line ranges, symbol names, and acceptance criteria a worker needs.
-- **Never** forward full conversation history, unrelated files, or unedited command logs into a worker brief.
-- On the swarm board, reference prior posts by sequence number (`#4`) instead of copy-pasting another worker's report, and `@mention` only the agent that must act next (`@name` wakes that agent and costs a turn).
+- Pass **only** exact file paths, line ranges, symbol names, and acceptance criteria—never full chat history or raw logs.
+- Reference prior board posts by `#seq` (`read_board{seqs:[7]}`) instead of copy-pasting specs.
+- `@mention` only the agent that must act next (`@name` wakes that worker and costs a turn).
 
 ### 2. Concise Return
-- Workers must return **only** actionable output using one of these prefixes:
-  - `@coordinator [done] [OK]` followed by modified/created file paths, a brief diff or change summary, and verification output (exit code / test count).
-  - `@coordinator [ERROR]` followed by the blocking reason and escalation target.
-- Do not include conversational filler, restatements of the brief, or speculative commentary.
+- Workers return **only**:
+  - `@coordinator [done] [OK]` + modified file paths + concise summary/diff + test exit status
+  - `@coordinator [ERROR]` + exact blocker + escalation target
+- Zero preamble or restatement of the brief.
 
-### 3. Fail-Fast Escalation
-- If `TIER_LOW` (`gemini-3.8-flash-low`) fails **once** (wrong edit, failing test, missing context, or ambiguity), **stop immediately**.
-- Do **not** retry or loop on `gemini-3.8-flash-low`. Escalate directly to:
-  - `TIER_ARCHITECT` (`gemini-4-hydrogen-high`) if the failure stems from unclear design, spec gaps, or root-cause uncertainty.
-  - `TIER_CODER` (`gemini-4-neon-high`) if the failure stems from implementation complexity or multi-file coupling.
+### 3. Fail-Fast & Warm-Context Escalation
+- If `TIER_LOW` fails **once**, **stop immediately**—never loop or retry on Tier 1.
+- **Warm Context:** If the worker already read large files, escalate in-place with `swarm{action: "model", name, model: "<TIER_ARCHITECT|TIER_CODER>"}` to keep its context.
+- **Cold Context:** If Tier 1 failed before reading target files, spawn a Tier 2/3 worker via `swarm{action: "add"}` directly.
