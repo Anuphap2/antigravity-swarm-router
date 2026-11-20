@@ -1,11 +1,66 @@
 param(
     [string]$TargetDir = ".",
+    [ValidateSet("quota-saver", "balanced", "speed-first")]
+    [string]$Preset = "quota-saver",
+    [switch]$Update,
+    [switch]$Uninstall,
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoZipUrl = "https://github.com/Anuphap2/antigravity-swarm-router/archive/refs/heads/main.zip"
+$RouterSkills = @("board-updater", "test-runner", "system-architect", "deep-coder")
+$PresetMap = @{
+    "quota-saver" = "gemini-4-argon-low"
+    "balanced"    = "claude-sonnet-5-5-low"
+    "speed-first" = "gemini-3.8-flash-low"
+}
+$TierLowModel = $PresetMap[$Preset]
+$PresetExplicit = $PSBoundParameters.ContainsKey("Preset")
+
+if ($Uninstall) {
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
+        throw "Target directory does not exist: $TargetDir"
+    }
+    $ResolvedTarget = (Resolve-Path -LiteralPath $TargetDir).Path
+
+    foreach ($Skill in $RouterSkills) {
+        $SkillDir = Join-Path $ResolvedTarget ".agent\skills\$Skill"
+        if (Test-Path -LiteralPath $SkillDir) {
+            Remove-Item -LiteralPath $SkillDir -Recurse -Force
+            Write-Host "[OK] Removed $SkillDir"
+        }
+    }
+
+    $SkillsRoot = Join-Path $ResolvedTarget ".agent\skills"
+    $AgentRoot = Join-Path $ResolvedTarget ".agent"
+    if ((Test-Path -LiteralPath $SkillsRoot) -and ((Get-ChildItem -LiteralPath $SkillsRoot -Force | Measure-Object).Count -eq 0)) {
+        Remove-Item -LiteralPath $SkillsRoot -Force
+    }
+    if ((Test-Path -LiteralPath $AgentRoot) -and ((Get-ChildItem -LiteralPath $AgentRoot -Force | Measure-Object).Count -eq 0)) {
+        Remove-Item -LiteralPath $AgentRoot -Force
+    }
+
+    $TargetAgents = Join-Path $ResolvedTarget "AGENTS.md"
+    if (Test-Path -LiteralPath $TargetAgents) {
+        if ($Force) {
+            Remove-Item -LiteralPath $TargetAgents -Force
+            Write-Host "[OK] Removed $TargetAgents"
+        } else {
+            $Answer = Read-Host "[WARN] Remove $TargetAgents? [y/N]"
+            if ($Answer -match "^[Yy]$") {
+                Remove-Item -LiteralPath $TargetAgents -Force
+                Write-Host "[OK] Removed $TargetAgents"
+            } else {
+                Write-Host "[SKIP] Kept $TargetAgents"
+            }
+        }
+    }
+
+    Write-Host "[DONE] Uninstalled antigravity-swarm-router from $ResolvedTarget"
+    exit 0
+}
 
 if (-not (Test-Path -LiteralPath $TargetDir)) {
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
@@ -35,28 +90,37 @@ try {
         $SourceDir = $Extracted.FullName
     }
 
-    # Copy AGENTS.md with overwrite prompt if it already exists
     $TargetAgents = Join-Path $ResolvedTarget "AGENTS.md"
     $SourceAgents = Join-Path $SourceDir "AGENTS.md"
+    $InstalledAgents = $false
 
-    if ((Test-Path -LiteralPath $TargetAgents) -and -not $Force) {
+    if ($Update) {
+        Write-Host "[INFO] Update mode: preserving existing AGENTS.md"
+    } elseif ((Test-Path -LiteralPath $TargetAgents) -and -not $Force) {
         $Answer = Read-Host "[WARN] $TargetAgents already exists. Overwrite? [y/N]"
         if ($Answer -match "^[Yy]$") {
             Copy-Item -LiteralPath $SourceAgents -Destination $TargetAgents -Force
+            $InstalledAgents = $true
             Write-Host "[OK] Overwrote $TargetAgents"
         } else {
             Write-Host "[SKIP] Kept existing $TargetAgents"
         }
     } else {
         Copy-Item -LiteralPath $SourceAgents -Destination $TargetAgents -Force
+        $InstalledAgents = $true
         Write-Host "[OK] Installed $TargetAgents"
     }
 
-    # Copy only router skills into .agent\skills\ without touching unrelated files
+    if ($InstalledAgents -and ($TierLowModel -ne "gemini-4-argon-low")) {
+        $Content = [System.IO.File]::ReadAllText($TargetAgents)
+        [System.IO.File]::WriteAllText($TargetAgents, $Content.Replace("gemini-4-argon-low", $TierLowModel), [System.Text.UTF8Encoding]::new($false))
+        Write-Host "[OK] Applied preset '$Preset' ($TierLowModel) to AGENTS.md"
+    }
+
     $TargetSkillsRoot = Join-Path $ResolvedTarget ".agent\skills"
     New-Item -ItemType Directory -Path $TargetSkillsRoot -Force | Out-Null
 
-    foreach ($Skill in @("board-updater", "system-architect", "deep-coder")) {
+    foreach ($Skill in $RouterSkills) {
         $SrcSkill = Join-Path $SourceDir ".agent\skills\$Skill"
         $DstSkill = Join-Path $TargetSkillsRoot $Skill
         if (Test-Path -LiteralPath $SrcSkill) {
@@ -64,11 +128,19 @@ try {
                 New-Item -ItemType Directory -Path $DstSkill -Force | Out-Null
             }
             Copy-Item -Path (Join-Path $SrcSkill "*") -Destination $DstSkill -Recurse -Force
+            if (($TierLowModel -ne "gemini-4-argon-low") -and ($Skill -in @("board-updater", "test-runner"))) {
+                if (-not $Update -or $PresetExplicit) {
+                    $SkillMd = Join-Path $DstSkill "SKILL.md"
+                    $SkillText = [System.IO.File]::ReadAllText($SkillMd)
+                    [System.IO.File]::WriteAllText($SkillMd, $SkillText.Replace("gemini-4-argon-low", $TierLowModel), [System.Text.UTF8Encoding]::new($false))
+                }
+            }
             Write-Host "[OK] Installed $DstSkill"
         }
     }
 
-    Write-Host "[DONE] antigravity-swarm-router installed into $ResolvedTarget"
+    $ModeLabel = if ($Update) { "update" } else { "install" }
+    Write-Host "[DONE] antigravity-swarm-router ($ModeLabel, preset=$Preset) applied to $ResolvedTarget"
 }
 finally {
     if ($TempDir -and (Test-Path -LiteralPath $TempDir)) {

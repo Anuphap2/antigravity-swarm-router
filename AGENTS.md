@@ -8,7 +8,8 @@ Edit model IDs **here only** (and mirror `model:` in `.agent/skills/*/SKILL.md` 
 
 | Tier | Variable | Model ID | Skill Path | Primary Scope |
 | :--- | :--- | :--- | :--- | :--- |
-| Tier 1 (Default) | `TIER_LOW` | `gemini-4-argon-low` | `.agent/skills/board-updater/SKILL.md` | Board updates, card moves, status summaries, formatting (isolated quota pool) |
+| Tier 1 (Board) | `TIER_LOW` | `gemini-4-argon-low` | `.agent/skills/board-updater/SKILL.md` | Board updates, card moves, status summaries, formatting (isolated pool) |
+| Tier 1 (Tests) | `TIER_LOW` | `gemini-4-argon-low` | `.agent/skills/test-runner/SKILL.md` | Run tests/linters/builds, strip noise, return only failing stack trace |
 | Tier 2 (Architect) | `TIER_ARCHITECT` | `gemini-4-hydrogen-high` | `.agent/skills/system-architect/SKILL.md` | Architecture design, DB modeling, root-cause analysis, multi-worker spec split |
 | Tier 3 (Deep Coder) | `TIER_CODER` | `gemini-4-neon-high` | `.agent/skills/deep-coder/SKILL.md` | Multi-file refactoring, complex algorithms, concurrency/perf fixes, deep code reviews |
 
@@ -26,12 +27,13 @@ Switch to a fallback model from an independent quota pool via `swarm{action: "mo
 
 ## Orchestrator Routing Rules
 
-1. **Default to Tier 1 (`TIER_LOW` = `gemini-4-argon-low`)** for routine updates, formatting, and summaries so heavy `Hydrogen`/`Neon` quota is untouched.
-2. **Single-Worker Threshold (Avoid Unnecessary Splits):**
+1. **Default to Tier 1 (`TIER_LOW` = `gemini-4-argon-low`)** for routine updates, formatting, summaries, and test/linter runs so heavy `Hydrogen`/`Neon` quota is untouched.
+2. **Offload Verbose Test Logs to `test-runner`:** Before asking `TIER_CODER` (`gemini-4-neon-high`) to debug a failing suite, run the suite on `test-runner` so `TIER_CODER` receives only the failing test ID and minimal traceback (`#seq` reference).
+3. **Single-Worker Threshold (Avoid Unnecessary Splits):**
    - If a task touches **1–2 files** with clear requirements and no cross-module ambiguity, **do not split Tier 2 -> Tier 3**. Route straight to one worker (`TIER_LOW` for text/boards, `TIER_CODER` for code).
-3. **Route to Tier 2 (`TIER_ARCHITECT` = `gemini-4-hydrogen-high`)** only when the task needs system/DB modeling, multi-layer root-cause analysis, or splitting a large spec into non-overlapping worker tasks.
-4. **Route to Tier 3 (`TIER_CODER` = `gemini-4-neon-high`)** for coordinated multi-file refactors, complex algorithms, concurrency/performance fixes, or deep code reviews.
-5. **Swarm Mechanics:** Assign non-overlapping file ownership; use `workspace: "share"` for concurrent file editors and `inherit` for readers/board updaters.
+4. **Route to Tier 2 (`TIER_ARCHITECT` = `gemini-4-hydrogen-high`)** only when the task needs system/DB modeling, multi-layer root-cause analysis, or splitting a large spec into non-overlapping worker tasks.
+5. **Route to Tier 3 (`TIER_CODER` = `gemini-4-neon-high`)** for coordinated multi-file refactors, complex algorithms, concurrency/performance fixes, or deep code reviews.
+6. **Swarm Mechanics:** Assign non-overlapping file ownership; use `workspace: "share"` for concurrent file editors and `inherit` for readers, `test-runner`, and `board-updater`.
 
 ---
 
@@ -39,16 +41,17 @@ Switch to a fallback model from an independent quota pool via `swarm{action: "mo
 
 ### 1. Minimal Context Handoff
 - Pass **only** exact file paths, line ranges, symbol names, and acceptance criteria—never full chat history or raw logs.
-- Reference prior board posts by `#seq` (`read_board{seqs:[7]}`) instead of copy-pasting specs.
+- Reference prior board posts by `#seq` (`read_board{seqs:[7]}`) instead of copy-pasting specs or test logs.
 - `@mention` only the agent that must act next (`@name` wakes that worker and costs a turn).
 
 ### 2. Concise Return
 - Workers return **only**:
-  - `@coordinator [done] [OK]` + modified file paths + concise summary/diff + test exit status
+  - `@coordinator [done] [OK]` / `[FAIL]` + modified file paths + concise summary/diff or compressed failure trace
   - `@coordinator [ERROR]` + exact blocker + escalation target
 - Zero preamble or restatement of the brief.
 
-### 3. Fail-Fast & Warm-Context Escalation
+### 3. Fail-Fast & Stuck-Worker Watchdog
 - If `TIER_LOW` fails **once**, **stop immediately**—never loop or retry on Tier 1.
-- **Warm Context:** If the worker already read large files, escalate in-place with `swarm{action: "model", name, model: "<TIER_ARCHITECT|TIER_CODER>"}` to keep its context.
+- **Warm Context:** If a worker already read large files, escalate in-place with `swarm{action: "model", name, model: "<TIER_ARCHITECT|TIER_CODER>"}` to keep its context.
 - **Cold Context:** If Tier 1 failed before reading target files, spawn a Tier 2/3 worker via `swarm{action: "add"}` directly.
+- **Stuck-Worker Watchdog:** On `swarm{action: "status"}`, if a briefed worker enters `waiting` (or stays silent past expected completion) **without posting** `[done]` or `[ERROR]`, treat it as a silent-stall bug: `swarm{action: "kill", name: "<worker>"}` immediately and re-run on the **Fallback Quota Pool** (`claude-sonnet-5-5-low` for Tier 1).
