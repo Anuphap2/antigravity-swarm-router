@@ -12,7 +12,7 @@ tier: 1
 - Short summaries from `#seq` posts; Markdown/JSON/YAML formatting; localized text edits
 
 ## Workflow
-1. Read **only** target file/lines from the brief.
+1. Read **only** the target file/lines from the brief. (On warm follow-up `@mentions`, skip re-reading this `SKILL.md`.)
 2. Apply the deterministic edit and verify valid syntax.
 3. Post to `@coordinator` and stop.
 

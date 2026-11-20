@@ -12,7 +12,7 @@ tier: 1
 - Filtering verbose logs down to pass/fail counts and minimal failure traces (max 15 lines per failure)
 
 ## Workflow
-1. Run the exact test/check command given in the brief.
+1. Run the exact test/check command given in the brief. (On warm follow-up `@mentions`, skip re-reading this `SKILL.md`.)
 2. **All pass (exit 0):** Discard raw logs; return 1-line summary with counts.
 3. **Any failure (non-zero):** Extract **only** failing test IDs, `file:line`, and core error/assertion (strip passing lines and boilerplate).
 4. Post compressed result to `@coordinator` (or `@<coder>` if named in brief) and stop. Never edit source or test files.

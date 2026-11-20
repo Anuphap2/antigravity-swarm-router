@@ -1,16 +1,38 @@
 # antigravity-swarm-router
 
-A plug-and-play template repository for optimizing token and quota usage in Antigravity Swarm Mode using a **Default-Low, Escalate-High** model routing strategy with **Quota Pool Isolation**.
+A plug-and-play template repository for optimizing token, latency, and quota usage in Antigravity Swarm Mode using a **Default-Low, Escalate-High** routing strategy with **Quota Pool Isolation** and **Warm/Async Execution**.
 
-## Problem & Solution
+## Standard Swarm vs. `antigravity-swarm-router`
 
-**Problem:** Running every swarm worker on a frontier model wastes quota and latency on mechanical work (board updates, test-log filtering, formatting), while sharing one quota bucket across tiers still drains your primary coding quota.
+| Dimension | Standard Swarm (No Router) | `antigravity-swarm-router` (`v3.1`) |
+| :--- | :--- | :--- |
+| **Model Selection** | Every worker uses Coordinator's heavy model (`Hydrogen`/`Neon`) | 3-tier routing (`board-updater` & `test-runner` -> Tier 1, `system-architect` -> Tier 2, `deep-coder` -> Tier 3) |
+| **Primary Pool (`Hydrogen`/`Neon`) Drain** | Routine board/test work drains primary pool (`100%`) | Tier 1 runs on isolated pool (`Argon` / `Claude Sonnet Low`) -> **0% primary pool drain** |
+| **Test Log Handling** | Heavy coder reads full verbose test logs | `test-runner` filters out passing logs and passes only `file:line` + error |
+| **Cross-Worker Handoffs** | Full specs/files copy-pasted or whole files read | `#seq` references + `file_path:startLine-endLine` targeted ranges |
+| **Worker Lifecycle & Latency** | Cold-spawned per task; blocking waits on board edits | **Warm Tier-1 reuse**, **async fire-and-forget board updates**, and **1-line micro-task bypass** |
+| **Failures & Silent Stalls** | May retry/loop or hang silently (`waiting`) | **1-strike Fail-Fast** + **Stuck-Worker Watchdog** + cross-pool **Fallback** |
+| **Skill Overhead (Trade-off)** | `0 bytes` skill files | 4 compact skills (`1,044–1,480 bytes`) add ~2s on single cold Tier 1 tasks |
 
-**Solution:** `antigravity-swarm-router` enforces a four-skill routing policy in `AGENTS.md` paired with compact `.agent/skills/*/SKILL.md` definitions:
+### Measured Benchmark (vs. Standard Swarm)
 
-1. **Default-Low (Isolated Pool):** Route board/formatting work (`board-updater`) and verbose test runs (`test-runner`) to Tier 1 (`gemini-4-argon-low` or `claude-sonnet-5-5-low`) so they do not consume `Hydrogen`/`Neon` quota.
-2. **Single-Worker Threshold & Escalate-High:** Keep simple 1–2 file fixes on a single worker; escalate only true architectural/RCA work to `gemini-4-hydrogen-high` (`system-architect`) and heavy multi-file/concurrency coding to `gemini-4-neon-high` (`deep-coder`).
-3. **Fail-Fast & Stuck-Worker Watchdog:** Reference prior board posts by `#seq`, return concise `@coordinator [done] [OK]`/`[FAIL]`/`[ERROR]` outputs, kill/switch silent stalled workers immediately, and fail over across independent quota pools.
+| Metric | Standard / Sequential Baseline | `antigravity-swarm-router` (`v3.1`) | Measured Impact |
+| :--- | :--- | :--- | :--- |
+| **Primary Pool (`Hydrogen`/`Neon`) on Board/Test Work** | 100% of tasks | **0%** (isolated `Argon` / `Claude` pool) | **100% primary pool saved** |
+| **Multi-Step Pipeline (7 tasks: Design + Code + 2× Test + 3× Board)** | 171s sum / 7 cold spawns | **109s / 4 spawns** (async + warm reuse) | **36.3% faster, -42.9% spawns** |
+| **Line-Range Read Scope (`Neon` on 141-line file)** | 141 lines (100%) | **7 lines** (`pricing_service.py:123-129`) | **-95.0% lines read** |
+| **Verbose Test Log (`test-runner`)** | 2,019–3,036 chars raw log | **297 chars** (`[FAIL]`) / **117 chars** (`[OK]`) | **-85.3% to -94.2% log size** |
+| **Cross-Worker Handoff Brief** | 1,245 chars (full spec) | **308 chars** (`read_board{seqs:[7]}`) | **-75.3% handoff size** |
+| **Shared Board Reply Length** | 207 chars | **145 chars** (`Argon`) / **183 chars** (`Claude`) | **-30.0% / -11.6% board noise** |
+| **1–2 File Code Fix (Single-Worker Threshold)** | 59s / 2 workers (2-stage split) | **34s / 1 worker** (with test pass) | **42.4% faster, -50% workers** |
+| **Single Small Board Task Latency (Trade-off)** | **11s** (`Hydrogen`) | 18s (`Claude`) / 39s (`Argon`) / 13s (`3.8 Flash`) | **+2s to +28s** on 1-off cold task |
+
+*Tested on Antigravity (Nov 2026) — run `swarm{action: "models", all: true}` to verify model IDs.*
+
+### When to Use Which
+
+- **Use `antigravity-swarm-router`:** Multi-worker swarms, recurring board/test cycles, large files, or when preserving `Hydrogen`/`Neon` quota.
+- **Bypass / Use Standard Swarm:** One-off single-line status posts (`Micro-Task Bypass`: coordinator posts directly) or isolated 1-file trivial edits where raw speed beats quota isolation (or install with `--preset speed-first`).
 
 ---
 
@@ -19,15 +41,16 @@ A plug-and-play template repository for optimizing token and quota usage in Anti
 ```mermaid
 flowchart TD
     U[User Request] --> C[Orchestrator / AGENTS.md]
-    C -->|Boards, status, formatting| T1B["Tier 1: board-updater (.agent/skills/board-updater/SKILL.md)"]
-    C -->|Run tests/linters, strip logs| T1T["Tier 1: test-runner (.agent/skills/test-runner/SKILL.md)"]
-    C -->|Architecture, DB modeling, RCA, spec split| T2["Tier 2: system-architect (.agent/skills/system-architect/SKILL.md)"]
-    C -->|1-2 file code fix or heavy refactor/concurrency| T3["Tier 3: deep-coder (.agent/skills/deep-coder/SKILL.md)"]
+    C -->|1-line board post only| BYPASS[Coordinator posts directly]
+    C -->|Board file edits, async parallel| T1B["Tier 1 Warm: board-updater (.agent/skills/board-updater/SKILL.md)"]
+    C -->|Run tests/linters, strip logs| T1T["Tier 1 Warm: test-runner (.agent/skills/test-runner/SKILL.md)"]
+    C -->|Architecture, RCA, line-range handoff| T2["Tier 2: system-architect (.agent/skills/system-architect/SKILL.md)"]
+    C -->|1-2 file fix or line-range refactor| T3["Tier 3: deep-coder (.agent/skills/deep-coder/SKILL.md)"]
 
     T1B -->|Fails once / Ambiguous| T2
     T1T -->|Fails test -> compressed trace| T3
     T1T -->|Env/config blocker| T2
-    T2 -->|Bounded multi-worker spec| T3
+    T2 -->|file_path:startLine-endLine| T3
     T3 -->|Spec gap / Design conflict| T2
     T3 -->|Verify fix| T1T
 ```
@@ -71,8 +94,8 @@ irm https://raw.githubusercontent.com/Anuphap2/antigravity-swarm-router/main/ins
 
 | Preset | Tier 1 (`TIER_LOW`) Model | Behavior |
 | :--- | :--- | :--- |
-| `quota-saver` *(default)* | `gemini-4-argon-low` | Separate quota pool; 0% drain on `Hydrogen`/`Neon` (~39s on board task) |
-| `balanced` | `claude-sonnet-5-5-low` | Separate quota pool + ~2x faster than Argon (~18s on board task) |
+| `quota-saver` *(default)* | `gemini-4-argon-low` | Separate quota pool; 0% drain on `Hydrogen`/`Neon` (~39s cold / ~18–35s warm) |
+| `balanced` | `claude-sonnet-5-5-low` | Separate quota pool + faster Tier 1 (~18s on board task) |
 | `speed-first` | `gemini-3.8-flash-low` | Fastest Tier 1 (~13s), shares Gemini quota pool |
 
 Both `install.sh` and `install.ps1` preserve unrelated files inside `.agent/` and prompt before overwriting or removing `AGENTS.md` (pass `--force` / `-Force` for non-interactive mode).
@@ -96,26 +119,11 @@ See [examples/custom-models.md](examples/custom-models.md) for custom mappings, 
 
 ---
 
-## Benchmark (vs. Standard Swarm)
-
-| Metric | Standard Swarm | `antigravity-swarm-router` | Measured Impact |
-| :--- | :--- | :--- | :--- |
-| **Primary Pool (`Hydrogen`/`Neon`) on Board/Test Work** | 100% of tasks | **0%** (isolated `Argon` / `Claude` pool) | **100% primary pool saved** |
-| **Shared Board Reply Length** | 207 chars | 145 chars (`Argon`) / 183 chars (`Claude`) | **-30.0% / -11.6% board noise** |
-| **Cross-Worker Handoff Brief** | 1,245 chars (full spec) | 308 chars (`read_board{seqs:[7]}`) | **-75.3% handoff size** |
-| **Verbose Test Log (`test-runner`)** | 3,036 chars / 66 lines raw log | **316 chars / 1 line** (`Argon`, 15s) | **-89.6% test log size** |
-| **1–2 File Code Fix (Single-Worker Threshold)** | 59s / 2 workers (2-stage split) | **34s / 1 worker** (with test pass) | **42.4% faster, -50% workers** |
-| **Fail-Fast on Missing Target** | May retry/loop | Stops in **1 turn (8s)** -> `ESCALATE` | **Zero retry loops** |
-| **Single Small Board Task Latency (Trade-off)** | **11s** (`Hydrogen`) | 39s (`Argon`) / 18s (`Claude`) / 13s (`3.8 Flash`) | **+7s to +28s** (`SKILL.md` load + model speed) |
-
-*Tested on Antigravity (Nov 2026) — run `swarm{action: "models", all: true}` to verify model IDs.*
-
----
-
 ## Repository Structure
 
 ```text
 .
+├── .gitattributes
 ├── AGENTS.md
 ├── LICENSE
 ├── README.md
