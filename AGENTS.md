@@ -57,5 +57,5 @@ Switch to a fallback model from an independent quota pool via `swarm{action: "mo
 
 ### 3. Fail-Fast & Stuck-Worker Watchdog
 - If `TIER_LOW` fails **once**, **stop immediately**—never loop or retry on Tier 1.
-- **Warm vs. Cold Escalation:** If a worker already read large files, escalate in-place with `swarm{action: "model", name, model: "<TIER_ARCHITECT|TIER_CODER>"}` to keep its context; if it failed cold, `add` a Tier 2/3 worker directly.
-- **Stuck-Worker Watchdog:** On `swarm{action: "status"}`, if a briefed worker enters `waiting` (or stays silent past expected completion) **without posting** `[done]` or `[ERROR]`, treat it as a silent-stall bug: `swarm{action: "kill", name: "<worker>"}` immediately and re-run on the **Fallback Quota Pool** (`claude-sonnet-5-5-low` for Tier 1).
+- **Warm vs. Cold Escalation:** If a worker already read large files, escalate in-place with `swarm{action: "model", name, model: "<TIER_ARCHITECT|TIER_CODER>"}` to keep its context; **kill it (or revert to `TIER_LOW`) immediately after the escalated task** so it never stays warm on a heavy model. If it failed cold, `add` a Tier 2/3 worker directly.
+- **Stuck-Worker Watchdog:** On `swarm{action: "status"}`, if a briefed worker enters `waiting` (or stays silent past expected completion) **without posting** `[done]` or `[ERROR]`, treat it as a silent-stall bug: `swarm{action: "kill", name: "<worker>"}` immediately and re-run on the **Fallback Quota Pool** (`claude-sonnet-5-5-low` for Tier 1). Cap at **1 fallback retry**—if fallback also stalls, stop and report to the user.
