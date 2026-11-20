@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify install.sh uses LF line endings and valid Bash syntax
+        run: |
+          if grep -q $'\r' install.sh; then
+            echo "[ERROR] install.sh contains CRLF line endings"
+            exit 1
+          fi
+          bash -n install.sh
+
+      - name: Verify SKILL.md frontmatter and no personal path leaks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+
+          skills = sorted(Path(".agent/skills").glob("*/SKILL.md"))
+          expected = {"swarm-router", "board-updater", "test-runner", "system-architect", "deep-coder"}
+          found = {p.parent.name for p in skills}
+          assert found == expected, f"Skill mismatch: {found} != {expected}"
+
+          for p in skills:
+              text = p.read_text(encoding="utf-8")
+              assert text.startswith("---\n"), f"{p} missing YAML frontmatter"
+              fm = text.split("---\n", 2)[1]
+              assert re.search(r"^name:\s*\S+", fm, re.M), f"{p} missing name"
+              assert re.search(r"^description:\s*.+", fm, re.M), f"{p} missing description"
+
+          forbidden = re.compile(r"[A-Za-z]:[/\\]Users[/\\]|/Users/[^/\s]+/|<GITHUB_" + r"USER>|<YOUR_" + r"NAME>")
+          for f in Path(".").rglob("*"):
+              if f.is_file() and ".git" not in f.parts and f != Path(".github/workflows/ci.yml"):
+                  content = f.read_text(encoding="utf-8", errors="ignore")
+                  m = forbidden.search(content)
+                  assert not m, f"Forbidden path/placeholder '{m.group(0)}' in {f}"
+          print(f"[OK] Validated {len(skills)} skills and repo hygiene.")
+          PY
+
+      - name: Test reproducible benchmark fixture generator
+        run: |
+          T="$(mktemp -d)"
+          python3 tests/setup-bench.py "$T"
+          test -f "$T/pricing_service.py"
+          test -f "$T/test_pricing.py"
+          test -f "$T/BOARD.md"
+          set +e
+          python3 "$T/test_pricing.py" >/tmp/bench_out.txt 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          rm -rf "$T" /tmp/bench_out.txt
+
+      - name: Test install.sh presets, --update, and --uninstall
+        run: |
+          set -e
+          T="$(mktemp -d)"
+          trap 'rm -rf "$T"' EXIT
+
+          bash ./install.sh "$T" --preset balanced
+          grep -q "claude-sonnet-5-5-low" "$T/AGENTS.md"
+          grep -q "model: claude-sonnet-5-5-low" "$T/.agent/skills/board-updater/SKILL.md"
+          grep -q "model: claude-sonnet-5-5-low" "$T/.agent/skills/test-runner/SKILL.md"
+
+          echo "CUSTOM_AGENTS" > "$T/AGENTS.md"
+          mkdir -p "$T/.agent/skills/custom-skill"
+          echo "KEEP" > "$T/.agent/skills/custom-skill/SKILL.md"
+          rm -rf "$T/.agent/skills/test-runner"
+
+          bash ./install.sh "$T" --update
+          test "$(cat "$T/AGENTS.md")" = "CUSTOM_AGENTS"
+          test "$(cat "$T/.agent/skills/custom-skill/SKILL.md")" = "KEEP"
+          test -f "$T/.agent/skills/test-runner/SKILL.md"
+
+          bash ./install.sh "$T" --uninstall
+          test -f "$T/AGENTS.md"
+          test -f "$T/.agent/skills/custom-skill/SKILL.md"
+          test ! -d "$T/.agent/skills/swarm-router"
+
+          bash ./install.sh "$T" --uninstall --force
+          test ! -f "$T/AGENTS.md"
+          test -f "$T/.agent/skills/custom-skill/SKILL.md"
+
+  test-windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test install.ps1 presets, -Update, and -Uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $t = Join-Path $env:TEMP ("ci-ps-" + [Guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $t -Force | Out-Null
+          try {
+            ./install.ps1 -TargetDir $t -Preset speed-first
+            if (-not (Select-String -Path "$t\AGENTS.md" -Pattern "gemini-3.8-flash-low" -Quiet)) { throw "Missing speed-first in AGENTS.md" }
+            if (-not (Select-String -Path "$t\.agent\skills\board-updater\SKILL.md" -Pattern "model: gemini-3.8-flash-low" -Quiet)) { throw "Missing speed-first in board-updater" }
+
+            Set-Content -Path "$t\AGENTS.md" -Value "CUSTOM_AGENTS"
+            New-Item -ItemType Directory -Path "$t\.agent\skills\custom-skill" -Force | Out-Null
+            Set-Content -Path "$t\.agent\skills\custom-skill\SKILL.md" -Value "KEEP"
+            Remove-Item "$t\.agent\skills\test-runner" -Recurse -Force
+
+            ./install.ps1 -TargetDir $t -Update
+            if ((Get-Content "$t\AGENTS.md" -Raw).Trim() -ne "CUSTOM_AGENTS") { throw "Update overwrote AGENTS.md" }
+            if (-not (Test-Path "$t\.agent\skills\test-runner\SKILL.md")) { throw "Update did not restore test-runner" }
+            if (-not (Test-Path "$t\.agent\skills\custom-skill\SKILL.md")) { throw "Update removed custom skill" }
+
+            ./install.ps1 -TargetDir $t -Uninstall -Force
+            if (Test-Path "$t\AGENTS.md") { throw "Uninstall -Force did not remove AGENTS.md" }
+            if (Test-Path "$t\.agent\skills\swarm-router") { throw "Uninstall did not remove swarm-router" }
+            if (-not (Test-Path "$t\.agent\skills\custom-skill\SKILL.md")) { throw "Uninstall removed custom skill" }
+          }
+          finally {
+            Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+          }
