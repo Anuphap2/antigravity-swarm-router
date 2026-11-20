@@ -29,6 +29,17 @@ A plug-and-play template repository for optimizing token, latency, and quota usa
 
 *Tested on Antigravity (Nov 2026) — run `swarm{action: "models", all: true}` to verify model IDs.*
 
+### Production Case Study (`seat-lock-demo` — 19 Unit Tests + Live UI)
+
+Full-stack concurrency app (5×5 seat map with 30s TTL locks) built end-to-end via `/swarm-router`:
+
+| Metric | Observed Result |
+| :--- | :--- |
+| **Worker Spawns vs. Warm Reuses** | **4 spawns / 9 reuses** across **13 dispatches** (`@board-updater` hit 6-turn Context Cap cleanly) |
+| **TDD Red Test Log Compression** | **7,310 B (114 lines)** raw log -> **849 B (1 line)** sent to `Neon` (**-88.4% bytes, -99.1% lines**) |
+| **Primary Pool (`Hydrogen`/`Neon`) Offloaded** | **9 of 13 tasks** (6 board + 3 test runs) executed on `Argon` (**0%** primary pool drain) |
+| **Verification & Fault Recovery** | **19/19 unit tests passing**, live browser UI verified; recovered from 2 transient network errors |
+
 ### When to Use Which
 
 - **Use `antigravity-swarm-router`:** Multi-worker swarms, recurring board/test cycles, large files, or when preserving `Hydrogen`/`Neon` quota.
