@@ -54,8 +54,9 @@ fi
 # Copy AGENTS.md with overwrite prompt if it already exists
 if [[ -f "$TARGET_DIR/AGENTS.md" && "$FORCE" -ne 1 ]]; then
   REPLY="n"
-  if [[ -r /dev/tty ]]; then
-    read -r -p "[WARN] $TARGET_DIR/AGENTS.md already exists. Overwrite? [y/N] " REPLY < /dev/tty || REPLY="n"
+  if { exec 3< /dev/tty; } 2>/dev/null; then
+    read -r -u 3 -p "[WARN] $TARGET_DIR/AGENTS.md already exists. Overwrite? [y/N] " REPLY || REPLY="n"
+    exec 3<&-
   elif [[ -t 0 ]]; then
     read -r -p "[WARN] $TARGET_DIR/AGENTS.md already exists. Overwrite? [y/N] " REPLY || REPLY="n"
   else

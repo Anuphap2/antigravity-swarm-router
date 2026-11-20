@@ -8,9 +8,9 @@ A plug-and-play template repository for optimizing token usage in Antigravity Sw
 
 **Solution:** `antigravity-swarm-router` enforces a three-tier routing policy in `AGENTS.md` paired with scoped `.agent/skills/*/SKILL.md` definitions:
 
-1. **Default-Low:** Start routine and mechanical tasks on `flash-lite` (`board-updater`).
-2. **Escalate-High:** Route architectural design and root-cause analysis to `hydrogen` (`system-architect`), and multi-file coding/concurrency work to `neon` (`deep-coder`).
-3. **Fail-Fast & Minimal Handoff:** Workers receive only relevant file paths/lines, return concise `[OK]`/`[ERROR]` outputs, and escalate immediately on the first Tier 1 failure instead of looping.
+1. **Default-Low:** Start routine and mechanical tasks on `gemini-3.8-flash-low` (`board-updater`).
+2. **Escalate-High:** Route architectural design and root-cause analysis to `gemini-4-hydrogen-high` (`system-architect`), and multi-file coding/concurrency work to `gemini-4-neon-high` (`deep-coder`).
+3. **Fail-Fast & Minimal Handoff:** Workers receive only relevant file paths/lines, return concise `@coordinator [done] [OK]`/`[ERROR]` outputs, and escalate immediately on the first Tier 1 failure instead of looping.
 
 ---
 
@@ -19,9 +19,9 @@ A plug-and-play template repository for optimizing token usage in Antigravity Sw
 ```mermaid
 flowchart TD
     U[User Request] --> C[Orchestrator / AGENTS.md]
-    C -->|Default: boards, status, formatting| T1["Tier 1: flash-lite (.agent/skills/board-updater/SKILL.md)"]
-    C -->|Architecture, DB modeling, RCA, spec split| T2["Tier 2: hydrogen (.agent/skills/system-architect/SKILL.md)"]
-    C -->|Multi-file refactor, algorithms, perf/concurrency| T3["Tier 3: neon (.agent/skills/deep-coder/SKILL.md)"]
+    C -->|Default: boards, status, formatting| T1["Tier 1: gemini-3.8-flash-low (.agent/skills/board-updater/SKILL.md)"]
+    C -->|Architecture, DB modeling, RCA, spec split| T2["Tier 2: gemini-4-hydrogen-high (.agent/skills/system-architect/SKILL.md)"]
+    C -->|Multi-file refactor, algorithms, perf/concurrency| T3["Tier 3: gemini-4-neon-high (.agent/skills/deep-coder/SKILL.md)"]
 
     T1 -->|Fails once / Ambiguous| T2
     T1 -->|Fails once / Code complexity| T3
@@ -77,9 +77,9 @@ All tier mappings live in the **Model Configuration** table at the very top of `
 
 | Tier | Variable | Default Model ID | Skill Path |
 | :--- | :--- | :--- | :--- |
-| Tier 1 | `TIER_LOW` | `flash-lite` | `.agent/skills/board-updater/SKILL.md` |
-| Tier 2 | `TIER_ARCHITECT` | `hydrogen` | `.agent/skills/system-architect/SKILL.md` |
-| Tier 3 | `TIER_CODER` | `neon` | `.agent/skills/deep-coder/SKILL.md` |
+| Tier 1 | `TIER_LOW` | `gemini-3.8-flash-low` | `.agent/skills/board-updater/SKILL.md` |
+| Tier 2 | `TIER_ARCHITECT` | `gemini-4-hydrogen-high` | `.agent/skills/system-architect/SKILL.md` |
+| Tier 3 | `TIER_CODER` | `gemini-4-neon-high` | `.agent/skills/deep-coder/SKILL.md` |
 
 To swap models, edit the table in `AGENTS.md` (and optionally the `model:` field in `.agent/skills/*/SKILL.md`). See [examples/custom-models.md](examples/custom-models.md) for examples.
 
@@ -110,7 +110,7 @@ To swap models, edit the table in `AGENTS.md` (and optionally the `model:` field
 
 ## Caveats
 
-- **Model ID Availability:** `flash-lite`, `hydrogen`, and `neon` must match model IDs enabled in your Antigravity session (`swarm{action: "models", all: true}`). Update `AGENTS.md` if your provider uses different identifiers.
+- **Model ID Availability:** `gemini-3.8-flash-low`, `gemini-4-hydrogen-high`, and `gemini-4-neon-high` must match model IDs enabled in your Antigravity session (`swarm{action: "models", all: true}`). Update `AGENTS.md` if your account uses different identifiers.
 - **File Ownership:** Never assign two concurrent workers to edit the same file in `inherit` workspace mode. Use `workspace: "share"` or split work strictly by file/module.
 
 ## License
